@@ -15,7 +15,7 @@ while 1:
   GPIO.output(11, GPIO.LOW)
 
   # Warte 5s
-  time.sleep(5)
+  time.sleep(25)
 
   print("Going UP")
 
@@ -23,5 +23,5 @@ while 1:
   GPIO.output(11, GPIO.HIGH)
 
   # Warte 5s
-  time.sleep(5)
+  time.sleep(2)
 
