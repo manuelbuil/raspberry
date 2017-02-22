@@ -1,6 +1,7 @@
 import sensor
 import openweather as ow
 import logging
+from stevedore import driver
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -8,8 +9,13 @@ logger = logging.getLogger(__name__)
 
 def main():
 
-    ow.rain_today()
+    plugin = 'mail'  
 
+    mgr = driver.DriverManager(
+        namespace='watering.curier',
+        name=plugin,
+        invoke_on_load=True,
+    )
 
     # Check the humidity
     hum = sensor.read_humidity()
@@ -21,7 +27,11 @@ def main():
         if (not ow.rain_tomorrow() and ow.maxT_tomorrow() > 25):
             # We need to water the plant
             print("We must water the plants")
-            return
+            worked = mgr.driver.send_message()
+            if worked:
+                return
+            else:
+                log.error("Something went wrong while watering")
            
     if hum < 35:
         if (not ow.rain_today()):
