@@ -1,5 +1,5 @@
-import sensor
-import openweather as ow
+import libs.sensor as sensor
+import libs.openweather as ow
 import logging
 from stevedore import driver
 
@@ -12,7 +12,7 @@ def main():
     plugin = 'mail'  
 
     mgr = driver.DriverManager(
-        namespace='watering.curier',
+        namespace='water.curier',
         name=plugin,
         invoke_on_load=True,
     )
@@ -24,10 +24,13 @@ def main():
     if hum < 60:
         logger.info("Will it rain tomorrow? %s" %ow.rain_tomorrow())
         logger.info("Max. temperature tomorrow: %s" %ow.maxT_tomorrow())
-        if (not ow.rain_tomorrow() and ow.maxT_tomorrow() > 25):
+#        if (not ow.rain_tomorrow() and ow.maxT_tomorrow() > 25):
+        if ow.maxT_tomorrow() > 5:
             # We need to water the plant
             print("We must water the plants")
-            worked = mgr.driver.send_message()
+            logger.info("We choose the plug-in: %s" % mgr.driver.get_type())
+            message = "Rains tomorrow: " + str(ow.rain_tomorrow()) + "\nMax temperature tomorrow: " + str(ow.maxT_tomorrow())
+            worked = mgr.driver.send_message(message)
             if worked:
                 return
             else:

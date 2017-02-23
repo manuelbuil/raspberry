@@ -14,7 +14,7 @@ class SendDriverBaseClass(object):
 
 
     @abc.abstractmethod
-    def send_message(self):
+    def send_message(self, message):
         """Send the message to water the plants
 
         :returns True if everything went well

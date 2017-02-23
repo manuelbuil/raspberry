@@ -2,8 +2,8 @@ from curier_plugin import SendDriverBaseClass
 
 class SendWhatsapp(SendDriverBaseClass):
 
-    def get_type():
-        return "This is the whatsapp driver"
+    def get_type(self):
+        return "Whatsapp driver"
 
-    def send_message():
+    def send_message(self, message):
         return True

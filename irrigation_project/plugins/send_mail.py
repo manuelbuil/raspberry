@@ -1,9 +1,10 @@
 from curier_plugin import SendDriverBaseClass
+import libs.gmail as gmail
 
 class SendMail(SendDriverBaseClass):
 
-    def get_type():
-        return "This is the mail driver"
+    def get_type(self):
+        return "Mail driver"
 
-    def send_message():
-        return True
+    def send_message(self, message):
+        return gmail.send_mail(message)
