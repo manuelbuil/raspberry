@@ -1,4 +1,4 @@
-from curier_plugin import base
+from curier_plugin import SendDriverBaseClass
 
 class SendMail(SendDriverBaseClass):
 
