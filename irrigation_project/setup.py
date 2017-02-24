@@ -8,7 +8,7 @@ setup(
     description = ("Water your plants based on weather forecast and its humidity"),
     license = "BSD",
 #    include_package_data=True,
-#    packages=find_packages(),
+    packages=find_packages(),
     entry_points={
         'water.curier': [
              'mail = plugins.send_mail:SendMail',
