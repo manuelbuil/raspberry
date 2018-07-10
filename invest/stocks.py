@@ -1,9 +1,11 @@
-import datetime as dt
-from pandas_datareader import data, wb
-import time
-import pdb
-import logging
 import argparse
+import datetime as dt
+import logging
+import pdb
+import sqlite3
+import time
+
+from pandas_datareader import data, wb
 
 IBEX = ['ABE.MC','ACS.MC','ACX.MC','AENA.MC','AMS.MC','ANA.MC','BBVA.MC',
 'BKIA.MC','BKT.MC','CABK.MC','CLNX.MC','COL.MC','DIA.MC','ELE.MC','ENG.MC',
@@ -33,18 +35,24 @@ AEX = ['AALB.AS','ABN.AS','AD.AS','AGN.AS','AKZA.AS','ASML.AS','ATC.AS','BOKA.AS
 'RAND.AS','PHIA.AS','REN.AS','RDSA.AS','SBMO.AS','UL.AS','UNA.AS','VPK.AS',
 'WKL.AS']
 
-start_date = dt.datetime(2017, 1, 1)
-date0 = '2017-12-14'
-date1 = '2017-12-01'
-date2 = '2017-11-10'
-date3 = '2017-10-20'
-date4 = '2017-09-15'
-date5 = '2017-08-20'
-date6 = '2017-06-20'
-date7 = '2017-04-20'
-date8 = '2017-02-20'
+today = dt.datetime.today()
+date0 = today - dt.timedelta(days=15) #15 days from today
+date1 = date0 - dt.timedelta(days=15) #30 days from today
+date2 = date1 - dt.timedelta(days=15) #45 days from today
+date3 = date2 - dt.timedelta(days=15) #2 months from today
+date4 = date3 - dt.timedelta(days=15) #2.5 months from today
+date5 = date4 - dt.timedelta(days=15) #3 months from today
+date6 = date5 - dt.timedelta(days=30) #4 months from today
+date7 = date6 - dt.timedelta(days=30) #5 months from today
+date8 = date7 - dt.timedelta(days=30) #6 months from today
+date9 = date8 - dt.timedelta(days=30) #7 months from today
+date10 = date9 - dt.timedelta(days=30) #8 months from today
+date11 = date10 - dt.timedelta(days=30) #9 months from today
+date12 = date11 - dt.timedelta(days=30) #10 months from today
+date13 = date12 - dt.timedelta(days=60) #12 months from today
 
-dates = [date0, date1, date2, date3, date4, date5, date6, date7, date8]
+dates = [date0, date1, date2, date3, date4, date5, date6, date7, date8, date9, date10, date11, date12]
+print(dates)
 
 class bcolors:
     HEADER = '\033[95m'
@@ -65,30 +73,76 @@ parser.add_argument("-v", "--verbose", help="increase output verbosity",
 args = parser.parse_args()
 if args.verbose:
     logging.basicConfig(level=logging.DEBUG)
+else:
+    logging.basicConfig(level=logging.INFO)
 
 logging.debug('Only shown in debug mode')
 
-def fetch_data(share, retries=10):
+def testing_db():
+    conn = create_connection()
+    insert_data_db(conn, 'ENDESA', 21, 18.4, 12.052)
+    query_db(conn, 'objectives')
+
+def create_connection(db_file='stocks_db'):
+    """ create a database connection to a SQLite database """
+    #db_file=':memory:'
+    try:
+        db = sqlite3.connect(db_file)
+    except sqlite3.Error as e:
+        logging.error(e)
+
+    create_table_db(db)
+
+    return db
+
+def create_table_db(db, table_name='objectives'):
+    """ create a table in our database """
+    db.execute('drop table if exists {}'.format(table_name))
+    db.execute('create table {} (stock text, objective double, bottom double, percentage double)'.format(table_name))
+
+def insert_data_db(db, stock, objective, bottom, percentage, table_name='objectives'):
+    """ insert a value into the database """
+    db.execute('insert into {} (stock, objective, bottom, percentage) values (?, ?, ?, ?)'.format(table_name), (stock, objective, bottom, percentage))
+    db.commit()
+
+def query_db(db, table_name):
+    """ Queries data from the database """
+    cur = db.cursor()
+    cur.execute('SELECT * FROM {}'.format(table_name))
+    rows = cur.fetchall()
+    for row in rows:
+        logging.info("This is the row {}".format(row))
+
+def fetch_data(share, retries=5):
+    """ fetches the values from oldest date until today (big amount of data!)"""
     while retries > 0:
         try:
-            share_data = data.DataReader(share, 'yahoo', start_date, dt.datetime.today())
+            share_data = data.DataReader(share, 'yahoo', dates[-1], dt.datetime.today())
             break
         except Exception as e:
-#            print("Trying again %s. Retries remaining %s" %(share, retries))
+            #Sometimes the connection is not good, that's why retry
+            logging.debug("Trying again %s. Retries remaining %s" %(share, retries))
             time.sleep(2)
             retries -= 1
             if retries == 0:
-                print("No more retries for %s" %(share))
+                logging.info("No more retries for %s" %(share))
+                return None
     return share_data
 
-def filter_days(share, lowest_days):
-    #If the double bottom is on the next day, it is not valid
+def filter_days(share_data_limited, lowest_days):
+    '''
+    If there are several days whose value is a bottom, we just want the two
+    furthest away because those will give the highest objective
+    '''
+
     final_days = [lowest_days[0]]
     for i,day in enumerate(lowest_days[:-1]):
+        # Check if it is the next day. If not, we continue (I compare the value to know if it is the next day)
         if not share_data_limited['Low'].shift(-1).loc[day] == share_data_limited['Low'].loc[lowest_days[i+1]]:
             try:
                 final_days[1] = lowest_days[-1]
             except IndexError:
+                # The first time we add a second bottom, final_days[1] does not exist
                 final_days.append(lowest_days[-1])
 
     return final_days
@@ -121,7 +175,7 @@ def check_active_objective(share, lowest_days, lowest):
             try:
                 price_today = share['Close'].loc[dt.date.today()]
             except:
-                print("KAKE")
+                logging.info("KAKE")
                 price_today = share['Close'].loc[dt.date.today() - dt.timedelta(1)]
             percentage = ((objective - price_today)/price_today)*100
             return percentage, objective
@@ -145,39 +199,55 @@ def adjust_values(share):
 
     return share
 
-#debug = ['US.MI']
-debug = 0
+if __name__ == '__main__':
 
-#for share in debug:
-for share in IBEX + DAX + CAC + MIB + AEX:
-    share_data = fetch_data(share)
-    logging.debug(share_data)
-    share_data_limited_unadjusted = share_data.ix[dates[-1]:dt.date.today()]
-    share_data_limited = adjust_values(share_data_limited_unadjusted)
-    print("\nAnalyzing %s" % share)
-    for date in dates:
-        share_data_limited = share_data.ix[date:dt.date.today()]
-        lowest = share_data_limited.Low.min()
-        logging.debug("\nThis is the date: %s" % date)
-        logging.debug("This is the min %s" % lowest)
+    pdb.set_trace()
+    testing_db()
 
-        lowestMin = lowest - lowest * 0.0012
-        lowestMax = lowest + lowest * 0.0012
-        lowest_day = share_data_limited.idxmin()['Low']
-        logging.debug("This is the lowest_day %s" %lowest_day)
-        logging.debug("This is the lowestMin %s" %lowestMin)
-        logging.debug("This is the lowestMax %s" %lowestMax)
-        lowest_days = share_data_limited.index[(lowestMin < share_data_limited['Low']) & (lowestMax > share_data_limited['Low'])].tolist()
-        lowest_days = filter_days(share, lowest_days)
-        if len(lowest_days) == 1:
+#    debug = ['GI.MI']
+    debug = 0
+
+#    for share in debug:
+    for share in IBEX + DAX + CAC + MIB + AEX:
+        share_data = fetch_data(share)
+
+        # Check if share_data is the correct object and not None
+        if not hasattr(share_data, 'to_sql'):
             continue
-        else:
-#            print("Potential double bottom in %s on days %s" %(share, lowest_days))
-            percentage, objective = check_active_objective(share_data_limited, lowest_days, lowest)
-            if percentage:
-                print(bcolors.OKGREEN + "Objective to %s€ already active"
-                        %objective + bcolors.ENDC)
-                print("This is the potential gain %s%%" % percentage)
-                print("These are the bottom days %s" % lowest_days)
+        logging.debug(share_data)
 
-#print("Done")
+        # Fix bug in the low column
+        adjusted_data = adjust_values(share_data)
+        logging.info("\nAnalyzing %s" % share)
+
+        for date in dates:
+            # Grab only from date until today
+            share_data_limited = adjusted_data.ix[date:dt.date.today()]
+            # From the set of data, take the smallest value
+            lowest = share_data_limited.Low.min()
+            logging.debug("\nThis is the date: %s" % date)
+            logging.debug("This is the min %s" % lowest)
+
+            # Some tolerance is given, we don't expect exact double bottom
+            lowestMin = lowest - lowest * 0.0012
+            lowestMax = lowest + lowest * 0.0012
+
+            # Find the day which gave the lowest value
+            lowest_day = share_data_limited.idxmin()['Low']
+            logging.debug("This is the lowest_day %s" %lowest_day)
+            logging.debug("This is the lowestMin %s" %lowestMin)
+            logging.debug("This is the lowestMax %s" %lowestMax)
+
+            # Find the days whose value is between the range
+            lowest_days = share_data_limited.index[(lowestMin < share_data_limited['Low']) & (lowestMax > share_data_limited['Low'])].tolist()
+            lowest_days = filter_days(share_data_limited, lowest_days)
+            if len(lowest_days) == 1:
+                continue
+            else:
+                logging.debug(("Potential double bottom in %s on days %s" %(share, lowest_days)))
+                percentage, objective = check_active_objective(share_data_limited, lowest_days, lowest)
+                if percentage:
+                    print(bcolors.OKGREEN + "Objective to %s already active"
+                          %objective + bcolors.ENDC)
+                    print("This is the potential gain %s%%" % percentage)
+                    print("These are the bottom days %s" % lowest_days)
