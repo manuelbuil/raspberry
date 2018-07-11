@@ -103,12 +103,12 @@ def create_connection(db_file='stocks_db'):
 def create_table_db(db, table_name='objectives'):
     """ create a table in our database """
     db.execute('drop table if exists {}'.format(table_name))
-    db.execute('create table {} (stock text, objective double, bottom double, activationDay text, percentage double)'.format(table_name))
+    db.execute('create table {} (stock text, objective double, bottom double, activationDay datetime, percentage double)'.format(table_name))
 
 
 def insert_data_db(db, stock, objective, bottom, activation_day, percentage, table_name='objectives'):
     """ insert a value into the database """
-    db.execute('insert into {} (stock, objective, bottom, activationDay, percentage) values (?, ?, ?, ?, ?)'.format(table_name), (stock, objective, bottom, activation_day, percentage))
+    db.execute('insert into {} (stock, objective, bottom, activationDay, percentage) values (?, ?, ?, ?, ?)'.format(table_name), (stock, objective, bottom, activation_day.to_pydatetime(), percentage))
     db.commit()
 
 
@@ -130,6 +130,12 @@ def query_results(db_conn, share, table_name='objectives'):
         logging.info("This is the row {}".format(row))
 
     return rows
+
+
+def delete_entry_db(db_conn, share, maxim, table_name='objectives'):
+    """ Deletes the entry which we already read """
+    cur = db_conn.cursor()
+    cur.execute('DELETE FROM {} WHERE objective={} and stock="{}"'.format(table_name, maxim, share))
 
 
 def fetch_data(share, dates, retries=5):
@@ -308,7 +314,22 @@ def check_prev_objectives(db_conn, share, data, dates):
     for row in rows:
         maxim = row[1]
         minim = row[2]
-        share_data_limited = data.ix[date[-1]:dates[0]]
+        activation_day = row[3]
+        share_data_limited = data.ix[activation_day:dates[0]]
+
+        lowest = share_data_limited.Low.min()
+        highest = share_data_limited.High.max()
+
+        if (lowest < minim) and (highest > maxim):
+            print("FUUUCKKK")
+            delete_entry_db(db_conn, share, maxim)
+        elif (lowest < minim):
+            print("CANCELLED OBJECTIVE")
+            delete_entry_db(db_conn, share, maxim)
+        elif (highest > maxim):
+            print("OBJECTIVE ACHIEVED. CONGRATULATIONS!!")
+            delete_entry_db(db_conn, share, maxim)
+
 
 if __name__ == '__main__':
 
