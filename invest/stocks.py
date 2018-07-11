@@ -3,6 +3,7 @@ import datetime as dt
 import logging
 import pdb
 import sqlite3
+import sys
 import time
 
 from pandas_datareader import data, wb
@@ -35,25 +36,6 @@ AEX = ['AALB.AS','ABN.AS','AD.AS','AGN.AS','AKZA.AS','ASML.AS','ATC.AS','BOKA.AS
 'RAND.AS','PHIA.AS','REN.AS','RDSA.AS','SBMO.AS','UL.AS','UNA.AS','VPK.AS',
 'WKL.AS']
 
-today = dt.datetime.today()
-date0 = today - dt.timedelta(days=15) #15 days from today
-date1 = date0 - dt.timedelta(days=15) #30 days from today
-date2 = date1 - dt.timedelta(days=15) #45 days from today
-date3 = date2 - dt.timedelta(days=15) #2 months from today
-date4 = date3 - dt.timedelta(days=15) #2.5 months from today
-date5 = date4 - dt.timedelta(days=15) #3 months from today
-date6 = date5 - dt.timedelta(days=30) #4 months from today
-date7 = date6 - dt.timedelta(days=30) #5 months from today
-date8 = date7 - dt.timedelta(days=30) #6 months from today
-date9 = date8 - dt.timedelta(days=30) #7 months from today
-date10 = date9 - dt.timedelta(days=30) #8 months from today
-date11 = date10 - dt.timedelta(days=30) #9 months from today
-date12 = date11 - dt.timedelta(days=30) #10 months from today
-date13 = date12 - dt.timedelta(days=60) #12 months from today
-
-dates = [date0, date1, date2, date3, date4, date5, date6, date7, date8, date9, date10, date11, date12]
-print(dates)
-
 class bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -78,10 +60,32 @@ else:
 
 logging.debug('Only shown in debug mode')
 
+def get_dates(reference=dt.datetime.today()):
+    date0 = reference - dt.timedelta(days=15) #15 days from today
+    date1 = date0 - dt.timedelta(days=15) #30 days from today
+    date2 = date1 - dt.timedelta(days=15) #45 days from today
+    date3 = date2 - dt.timedelta(days=15) #2 months from today
+    date4 = date3 - dt.timedelta(days=15) #2.5 months from today
+    date5 = date4 - dt.timedelta(days=15) #3 months from today
+    date6 = date5 - dt.timedelta(days=30) #4 months from today
+    date7 = date6 - dt.timedelta(days=30) #5 months from today
+    date8 = date7 - dt.timedelta(days=30) #6 months from today
+    date9 = date8 - dt.timedelta(days=30) #7 months from today
+    date10 = date9 - dt.timedelta(days=30) #8 months from today
+    date11 = date10 - dt.timedelta(days=30) #9 months from today
+    date12 = date11 - dt.timedelta(days=30) #10 months from today
+    date13 = date12 - dt.timedelta(days=60) #12 months from today
+
+    dates = [date0, date1, date2, date3, date4, date5, date6, date7, date8, date9, date10, date11, date12]
+    return dates
+
 def testing_db():
-    conn = create_connection()
-    insert_data_db(conn, 'ENDESA', 21, 18.4, 12.052)
-    query_db(conn, 'objectives')
+    db_conn = create_connection()
+    insert_data_db(db_conn, 'SAN.MC', 21, 17.45, 11.448)
+    query_db(db_conn)
+    rows = query_results(db_conn, 'SAN.MC')
+    print("Here are the rows {}".format(rows))
+
 
 def create_connection(db_file='stocks_db'):
     """ create a database connection to a SQLite database """
@@ -95,17 +99,20 @@ def create_connection(db_file='stocks_db'):
 
     return db
 
+
 def create_table_db(db, table_name='objectives'):
     """ create a table in our database """
     db.execute('drop table if exists {}'.format(table_name))
-    db.execute('create table {} (stock text, objective double, bottom double, percentage double)'.format(table_name))
+    db.execute('create table {} (stock text, objective double, bottom double, activationDay text, percentage double)'.format(table_name))
 
-def insert_data_db(db, stock, objective, bottom, percentage, table_name='objectives'):
+
+def insert_data_db(db, stock, objective, bottom, activation_day, percentage, table_name='objectives'):
     """ insert a value into the database """
-    db.execute('insert into {} (stock, objective, bottom, percentage) values (?, ?, ?, ?)'.format(table_name), (stock, objective, bottom, percentage))
+    db.execute('insert into {} (stock, objective, bottom, activationDay, percentage) values (?, ?, ?, ?, ?)'.format(table_name), (stock, objective, bottom, activation_day, percentage))
     db.commit()
 
-def query_db(db, table_name):
+
+def query_db(db, table_name='objectives'):
     """ Queries data from the database """
     cur = db.cursor()
     cur.execute('SELECT * FROM {}'.format(table_name))
@@ -113,7 +120,19 @@ def query_db(db, table_name):
     for row in rows:
         logging.info("This is the row {}".format(row))
 
-def fetch_data(share, retries=5):
+
+def query_results(db_conn, share, table_name='objectives'):
+    """ Fetches the objectives from the db """
+    cur = db_conn.cursor()
+    cur.execute('SELECT * FROM {} WHERE stock = "{}"'.format(table_name, share))
+    rows = cur.fetchall()
+    for row in rows:
+        logging.info("This is the row {}".format(row))
+
+    return rows
+
+
+def fetch_data(share, dates, retries=5):
     """ fetches the values from oldest date until today (big amount of data!)"""
     while retries > 0:
         try:
@@ -128,6 +147,7 @@ def fetch_data(share, retries=5):
                 logging.info("No more retries for %s" %(share))
                 return None
     return share_data
+
 
 def filter_days(share_data_limited, lowest_days):
     '''
@@ -159,24 +179,33 @@ def objective_maximum_value(share, lowest_days, lowest):
     return objective, maximum
 
 def is_price_reached(share, price):
+    """ Checks if a specific share reached the priced"""
+
     max = share.High.max()
     if price <= max:
         return True
     else:
         return False
 
-def check_active_objective(share, lowest_days, lowest):
-    share_data_after_bottom = share.ix[lowest_days[1]:dt.datetime.today()]
+def check_active_objective(share, lowest_days, lowest, today):
+    '''
+    Checks two things:
+      * If the double bottom is activated (it overtook the maximum between double bottom)
+      * If the objective was not already reached
+    '''
+
+    share_data_after_bottom = share.ix[lowest_days[1]:today]
     objective, maximum_between = objective_maximum_value(share, lowest_days, lowest)
+
     # We increase a bit the maximum to activate the objective to avoid "al tick"
     maximum_between = maximum_between*1.0015
     if is_price_reached(share_data_after_bottom, maximum_between):
         if not is_price_reached(share_data_after_bottom, objective):
             try:
-                price_today = share['Close'].loc[dt.date.today()]
+                price_today = share['Adj Close'].loc[today]
             except:
                 logging.info("KAKE")
-                price_today = share['Close'].loc[dt.date.today() - dt.timedelta(1)]
+                price_today = share['Adj Close'].loc[today - dt.timedelta(1)]
             percentage = ((objective - price_today)/price_today)*100
             return percentage, objective
         else:
@@ -196,58 +225,149 @@ def adjust_values(share):
             share.loc[index,'Low'] = share.loc[index,'Low'] - diff
             share.loc[index,'High'] = share.loc[index,'High'] - diff
             share.loc[index,'Open'] = share.loc[index,'Open'] - diff
-
     return share
+
+def find_double_bottom(dates, data, today=dt.date.today()):
+    """ Finds double bottoms """
+
+    results = {}
+    for date in dates:
+
+        # today might be the same as date. If it is weekend, it will fail
+        if (date == today):
+            continue
+
+        logging.debug("\nAnalyzing between dates %s - %s" %(date, today))
+
+        # Grab only from date until today
+        share_data_limited = data.ix[date:today]
+
+        # From the set of data, take the smallest value
+        lowest = share_data_limited.Low.min()
+        logging.debug("\nThis is the date: %s" % date)
+        logging.debug("This is the min %s" % lowest)
+
+        # Some tolerance is given, we don't expect exact double bottom
+        lowestMin = lowest - lowest * 0.0012
+        lowestMax = lowest + lowest * 0.0012
+
+        # Find the day which gave the lowest value
+        lowest_day = share_data_limited.idxmin()['Low']
+
+        logging.debug("This is the lowest_day %s" %lowest_day)
+        logging.debug("This is the lowestMin %s" %lowestMin)
+        logging.debug("This is the lowestMax %s" %lowestMax)
+
+        # Find the days whose value is between the range
+        lowest_days = share_data_limited.index[(lowestMin < share_data_limited['Low']) & (lowestMax > share_data_limited['Low'])].tolist()
+        lowest_days = filter_days(share_data_limited, lowest_days)
+        if len(lowest_days) == 1:
+            continue
+        else:
+            logging.debug(("Potential double bottom in %s on days %s" %(share, lowest_days)))
+            percentage, objective = check_active_objective(share_data_limited, lowest_days, lowest, today)
+            if percentage:
+                results[date] = [percentage, objective, lowest_days, lowest]
+
+    return results
+
+
+def print_results(results):
+    '''
+    Print the found objectives, the percentage and the lowest days
+    results is a dictionary of lists that contain:
+      * [0] --> percentage
+      * [1] --> objective
+      * [2] --> lowest_days
+      * [3] --> bottom value
+    '''
+
+    for k, value in results.items():
+        print(bcolors.OKGREEN + "Objective to %s already active"
+              %value[1] + bcolors.ENDC)
+        print("This is the potential gain %s%%" % value[0])
+        print("These are the bottom days %s" % value[2])
+
+def store_results(results, db_conn, share):
+    '''
+    Store the found objectives in sqlite, the percentage and the
+    lowest days results is a dictionary of lists that contain:
+      * [0] --> percentage
+      * [1] --> objective
+      * [2] --> lowest_days: [2][1] is the activation day
+      * [3] --> bottom value
+    '''
+    for k, value in results.items():
+        insert_data_db(db_conn, share, value[1], value[3], value[2][1], value[0])
+
+    print_results(results)
+
+
+def check_prev_objectives(db_conn, share, data, dates):
+    rows = query_results(db_conn, share)
+    for row in rows:
+        maxim = row[1]
+        minim = row[2]
+        share_data_limited = data.ix[date[-1]:dates[0]]
 
 if __name__ == '__main__':
 
-    pdb.set_trace()
-    testing_db()
+    debug = ['SAN.MC']
+#    debug = 0
 
-#    debug = ['GI.MI']
-    debug = 0
+#    testing_db()
+#    sys.exit(0)
 
-#    for share in debug:
-    for share in IBEX + DAX + CAC + MIB + AEX:
-        share_data = fetch_data(share)
+    start_date = dt.datetime(2013, 1, 1) #we would start one year earlier
+    days_delay = 0
+    historic_analysis = True
 
-        # Check if share_data is the correct object and not None
-        if not hasattr(share_data, 'to_sql'):
-            continue
-        logging.debug(share_data)
+    if historic_analysis:
+            db_conn = create_connection()
 
-        # Fix bug in the low column
-        adjusted_data = adjust_values(share_data)
-        logging.info("\nAnalyzing %s" % share)
+    for share in debug:
+#    for share in IBEX + DAX + CAC + MIB + AEX:
 
-        for date in dates:
-            # Grab only from date until today
-            share_data_limited = adjusted_data.ix[date:dt.date.today()]
-            # From the set of data, take the smallest value
-            lowest = share_data_limited.Low.min()
-            logging.debug("\nThis is the date: %s" % date)
-            logging.debug("This is the min %s" % lowest)
+        if historic_analysis:
+            reference_print = start_date + dt.timedelta(days=1920)
+            dates_print = get_dates(reference_print)
+            logging.info("The historic analisys will be made from {} until {}\n".format(start_date, dates_print[0]))
+            dates = get_dates(start_date)
+            share_data = fetch_data(share, dates)
 
-            # Some tolerance is given, we don't expect exact double bottom
-            lowestMin = lowest - lowest * 0.0012
-            lowestMax = lowest + lowest * 0.0012
-
-            # Find the day which gave the lowest value
-            lowest_day = share_data_limited.idxmin()['Low']
-            logging.debug("This is the lowest_day %s" %lowest_day)
-            logging.debug("This is the lowestMin %s" %lowestMin)
-            logging.debug("This is the lowestMax %s" %lowestMax)
-
-            # Find the days whose value is between the range
-            lowest_days = share_data_limited.index[(lowestMin < share_data_limited['Low']) & (lowestMax > share_data_limited['Low'])].tolist()
-            lowest_days = filter_days(share_data_limited, lowest_days)
-            if len(lowest_days) == 1:
+            # Check if share_data is the correct object and not None
+            if not hasattr(share_data, 'to_sql'):
                 continue
-            else:
-                logging.debug(("Potential double bottom in %s on days %s" %(share, lowest_days)))
-                percentage, objective = check_active_objective(share_data_limited, lowest_days, lowest)
-                if percentage:
-                    print(bcolors.OKGREEN + "Objective to %s already active"
-                          %objective + bcolors.ENDC)
-                    print("This is the potential gain %s%%" % percentage)
-                    print("These are the bottom days %s" % lowest_days)
+            logging.debug(share_data)
+
+            # Fix bug in the low column
+            adjusted_data = adjust_values(share_data)
+
+            # 2000 is a bit more than 5 years
+            while(days_delay<2000):
+                reference = start_date + dt.timedelta(days=days_delay)
+                dates = get_dates(reference)
+                days_delay += 120 #4 months in next iteration
+
+                logging.info("\nAnalyzing %s between dates %s - %s" %(share, dates[-1], dates[0]))
+
+                check_prev_objectives(db_conn, share, adjusted_data, dates)
+
+                results = find_double_bottom(dates, adjusted_data, today=dates[0])
+                store_results(results, db_conn, share)
+
+        else:
+            dates = get_dates()
+            share_data = fetch_data(share, dates)
+
+            # Check if share_data is the correct object and not None
+            if not hasattr(share_data, 'to_sql'):
+                continue
+            logging.debug(share_data)
+
+            # Fix bug in the low column
+            adjusted_data = adjust_values(share_data)
+            logging.info("\nAnalyzing %s" % share)
+
+            results = find_double_bottom(dates, adjusted_data)
+            print_results(results)
