@@ -4,6 +4,7 @@ import logging
 import pdb
 import sqlite3
 import sys
+import testing_plotting
 import time
 
 from pandas_datareader import data, wb
@@ -96,19 +97,30 @@ def create_connection(db_file='stocks_db'):
         logging.error(e)
 
     create_table_db(db)
+    create_table_db(db, 'final_table')
 
     return db
 
 
 def create_table_db(db, table_name='objectives'):
     """ create a table in our database """
-    db.execute('drop table if exists {}'.format(table_name))
-    db.execute('create table {} (stock text, objective double, bottom double, activationDay datetime, percentage double)'.format(table_name))
+    if 'objectives' in table_name:
+        db.execute('drop table if exists {}'.format(table_name))
+        db.execute('create table {} (stock text, objective double, bottom double, activationDay datetime, percentage double)'.format(table_name))
+    elif 'final_table' in table_name:
+        db.execute('drop table if exists {}'.format(table_name))
+        db.execute('create table {} (stock text, objective double, bottom double, activationDay datetime, percentage double, correct int, UNIQUE(stock, objective, activationDay) ON CONFLICT REPLACE)'.format(table_name))
 
 
-def insert_data_db(db, stock, objective, bottom, activation_day, percentage, table_name='objectives'):
+def insert_data_db(db, stock, objective, bottom, activation_day, percentage, table_name='objectives', correct=False):
     """ insert a value into the database """
-    db.execute('insert into {} (stock, objective, bottom, activationDay, percentage) values (?, ?, ?, ?, ?)'.format(table_name), (stock, objective, bottom, activation_day.to_pydatetime(), percentage))
+    if 'objectives' in table_name:
+        db.execute('insert into {} (stock, objective, bottom, activationDay, percentage) values (?, ?, ?, ?, ?)'.format(table_name), (stock, objective, bottom, activation_day.to_pydatetime(), percentage))
+    elif 'final_table' in table_name:
+        db.execute('insert into {} (stock, objective, bottom, activationDay, percentage, correct) values (?, ?, ?, ?, ?, ?)'.format(table_name), (stock, objective, bottom, activation_day, percentage, correct))
+    else:
+        raise Exception("The table {} to be created in the database does not make sense".format(table_name))
+
     db.commit()
 
 
@@ -121,13 +133,16 @@ def query_db(db, table_name='objectives'):
         logging.info("This is the row {}".format(row))
 
 
-def query_results(db_conn, share, table_name='objectives'):
+def query_results(db_conn, share=False, table_name='objectives'):
     """ Fetches the objectives from the db """
     cur = db_conn.cursor()
-    cur.execute('SELECT * FROM {} WHERE stock = "{}"'.format(table_name, share))
+    if share:
+        cur.execute('SELECT * FROM {} WHERE stock = "{}"'.format(table_name, share))
+    else:
+        cur.execute('SELECT * FROM {}'.format(table_name, share))
     rows = cur.fetchall()
     for row in rows:
-        logging.info("This is the row {}".format(row))
+        logging.debug("This is the row {}".format(row))
 
     return rows
 
@@ -207,11 +222,20 @@ def check_active_objective(share, lowest_days, lowest, today):
     maximum_between = maximum_between*1.0015
     if is_price_reached(share_data_after_bottom, maximum_between):
         if not is_price_reached(share_data_after_bottom, objective):
+            #We need to avoid getting a saturday or sunday
+            if today.weekday() == 5:
+                today = today - dt.timedelta(1)
+            elif today.weekday() == 6:
+                today = today - dt.timedelta(2)
             try:
                 price_today = share['Adj Close'].loc[today]
-            except:
-                logging.info("KAKE")
-                price_today = share['Adj Close'].loc[today - dt.timedelta(1)]
+            except KeyError:
+                print("KAKE!!!")
+                if(((today - dt.timedelta(1)).weekday() != 5) and ((today - dt.timedelta(1)).weekday() != 6)):
+                    price_today = share['Adj Close'].loc[today - dt.timedelta(1)]
+                else:
+                    price_today = share['Adj Close'].loc[today - dt.timedelta(4)]
+
             percentage = ((objective - price_today)/price_today)*100
             return percentage, objective
         else:
@@ -247,6 +271,8 @@ def find_double_bottom(dates, data, today=dt.date.today()):
 
         # Grab only from date until today
         share_data_limited = data.ix[date:today]
+        if share_data_limited.empty:
+            continue
 
         # From the set of data, take the smallest value
         lowest = share_data_limited.Low.min()
@@ -270,10 +296,12 @@ def find_double_bottom(dates, data, today=dt.date.today()):
         if len(lowest_days) == 1:
             continue
         else:
-            logging.debug(("Potential double bottom in %s on days %s" %(share, lowest_days)))
+            logging.debug("Potential double bottom in %s on days %s" %(share, lowest_days))
             percentage, objective = check_active_objective(share_data_limited, lowest_days, lowest, today)
             if percentage:
-                results[date] = [percentage, objective, lowest_days, lowest]
+               results[date] = [percentage, objective, lowest_days, lowest]
+               #pdb.set_trace()
+               #testing_plotting.plot(share_data_limited)
 
     return results
 
@@ -310,7 +338,7 @@ def store_results(results, db_conn, share):
 
 
 def check_prev_objectives(db_conn, share, data, dates):
-    rows = query_results(db_conn, share)
+    rows = query_results(db_conn, share=share)
     for row in rows:
         maxim = row[1]
         minim = row[2]
@@ -321,38 +349,54 @@ def check_prev_objectives(db_conn, share, data, dates):
         highest = share_data_limited.High.max()
 
         if (lowest < minim) and (highest > maxim):
-            print("FUUUCKKK")
+            #Objective is broken and achieved. We need to check which one happened before
             delete_entry_db(db_conn, share, maxim)
+            lower_violations = share_data_limited.index[(share_data_limited['Low'] < minim)].tolist()
+            higher_violations = share_data_limited.index[(share_data_limited['High'] > maxim)].tolist()
+            #pdb.set_trace()
+            #testing_plotting.plot(share_data_limited)
+            if lower_violations[0] > higher_violations[0]: # > means later than
+                #Prediction correct!
+                print("OBJECTIVE ACHIEVED. CONGRATULATIONS!!")
+                insert_data_db(db_conn, share, maxim, minim, activation_day, row[4], table_name='final_table', correct=True)
+            else:
+                #Prediction not correct
+                print("CANCELLED OBJECTIVE")
+                insert_data_db(db_conn, share, maxim, minim, activation_day, row[4], table_name='final_table', correct=False)
         elif (lowest < minim):
             print("CANCELLED OBJECTIVE")
             delete_entry_db(db_conn, share, maxim)
+            insert_data_db(db_conn, share, maxim, minim, activation_day, row[4], table_name='final_table', correct=False)
         elif (highest > maxim):
             print("OBJECTIVE ACHIEVED. CONGRATULATIONS!!")
             delete_entry_db(db_conn, share, maxim)
+            insert_data_db(db_conn, share, maxim, minim, activation_day, row[4], table_name='final_table', correct=True)
 
 
 if __name__ == '__main__':
 
-    debug = ['SAN.MC']
-#    debug = 0
+    debug = ['GAS.MC']
 
 #    testing_db()
 #    sys.exit(0)
 
     start_date = dt.datetime(2013, 1, 1) #we would start one year earlier
-    days_delay = 0
     historic_analysis = True
 
     if historic_analysis:
-            db_conn = create_connection()
+        db_conn = create_connection()
 
-    for share in debug:
-#    for share in IBEX + DAX + CAC + MIB + AEX:
+        #Just for logging purposes
+        reference_print = start_date + dt.timedelta(days=1920)
+        dates_print = get_dates(reference_print)
+        logging.info("The historic analisys will be made from {} until {}\n".format(start_date, dates_print[0]))
 
+
+#    for share in debug:
+    for share in IBEX + DAX + CAC + MIB + AEX:
+        logging.info("\nAnalyzing %s" % share)
         if historic_analysis:
-            reference_print = start_date + dt.timedelta(days=1920)
-            dates_print = get_dates(reference_print)
-            logging.info("The historic analisys will be made from {} until {}\n".format(start_date, dates_print[0]))
+            # Get the full data (e.g. from 2013 until today)
             dates = get_dates(start_date)
             share_data = fetch_data(share, dates)
 
@@ -364,18 +408,24 @@ if __name__ == '__main__':
             # Fix bug in the low column
             adjusted_data = adjust_values(share_data)
 
+            days_delay = 0
             # 2000 is a bit more than 5 years
             while(days_delay<2000):
+
                 reference = start_date + dt.timedelta(days=days_delay)
                 dates = get_dates(reference)
-                days_delay += 120 #4 months in next iteration
 
-                logging.info("\nAnalyzing %s between dates %s - %s" %(share, dates[-1], dates[0]))
+                logging.debug("\nAnalyzing %s between dates %s - %s" %(share, dates[-1], dates[0]))
 
+                #Check if objectives were fulfilled
                 check_prev_objectives(db_conn, share, adjusted_data, dates)
 
                 results = find_double_bottom(dates, adjusted_data, today=dates[0])
                 store_results(results, db_conn, share)
+
+                days_delay += 120 #4 months in next iteration
+
+            query_results(db_conn, share=share, table_name='final_table')
 
         else:
             dates = get_dates()
@@ -388,7 +438,19 @@ if __name__ == '__main__':
 
             # Fix bug in the low column
             adjusted_data = adjust_values(share_data)
-            logging.info("\nAnalyzing %s" % share)
 
             results = find_double_bottom(dates, adjusted_data)
             print_results(results)
+
+    if historic_analysis:
+        rows = query_results(db_conn, table_name='final_table')
+        n = len(rows)
+        correct = 0
+        for row in rows:
+            print(row)
+            if row[5] == 1:
+                correct += 1
+
+        rate = correct/n
+        logging.info("The strategy has a success rate of: {}".format(rate))
+

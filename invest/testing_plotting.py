@@ -1,17 +1,21 @@
-import pandas_datareader.data as web
-import matplotlib.pyplot as plt
 import datetime
-import pdb
 
-start = datetime.datetime(2007, 1, 1)
-end = datetime.datetime(2018, 1, 3)
-share = web.DataReader('ITX.MC', 'yahoo', start, end)
-pdb.set_trace()
-share['Adj Close'].plot()
-plt.show()
-share['Low'].plot()
-plt.show()
-share['High'].plot()
-plt.show()
-share['Close'].plot()
-plt.show()
+import matplotlib.pyplot as plt
+import pandas_datareader.data as web
+
+def plot(data):
+#start = datetime.datetime(2013, 3, 1)
+#end = datetime.datetime(2013, 8, 1)
+#share = web.DataReader('SAN.MC', 'yahoo', start, end)
+    data['Adj Close'].plot()
+    plt.title("Adj Close")
+    plt.show()
+    data['Low'].plot()
+    plt.title("Low")
+    plt.show()
+    data['High'].plot()
+    plt.title("High")
+    plt.show()
+    data['Close'].plot()
+    plt.title("Close")
+    plt.show()
